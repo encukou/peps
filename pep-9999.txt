@@ -33,23 +33,23 @@ tackling, it does not attempt to resolve *all* remaining concerns. In particular
 Rationale
 =========
 
-XXX less focus on subinterpreters?  more on parity with pure Python?  mention differences with pure Python modules/functons?
-XXX providing "module globals" to extension methods; performance improvement
+PEP 489 introduced a new way to initialize extension modules, which brings
+several advantages to extensions that implement it:
 
-A step towards improving subinterpreter support in CPython is making it
-possible (and easy) to create multiple instances of a module object from
-a single extension.
-Each such module should have its own module state, distinct and isolated from
-other modules.
+    * The extension modules behave more like their Python counterparts.
+    * The extension modules can easily support loading into pre-existing
+      module objects, which paves the way for extension module support for
+      ``runpy`` or for systems that enable extension module reloading.
+    * Loading multiple modules from the same extension is possible, which
+      makes testing module isolation (a key feature for proper sub-interpreter
+      support) possible from a single interpreter.
 
-XXX mention avoiding process globals?
-
-The biggest hurdle for this goal is accessing such module state from methods
-of extension types.
-Currently, the best way to access this state is looking up the module via
+The biggest hurdle for adoption of PEP 489 is allowing access to module state
+from methods of extension types.
+Without PEP 489, the way to access this state is by looking up the module via
 ``PyState_FindModule``.
-This operation queries the thread-local state, making it relatively costly
-and consequently deterring module authors from using it.
+However, this operation queries the thread-local state, making it relatively
+costly and consequently deterring module authors from using it.
 
 Also, ``PyState_FindModule`` relies on the assumption that in each
 subinterpreter, there is only up to one one module corresponding to
@@ -58,15 +58,8 @@ machinery.  Since PEP 489 aimed to fix that,  the assumption does
 not hold for modules that use multi-phase initialization, so
 ``PyState_FindModule`` is unavailable for these modules.
 
-Enabling creation of several modules from the same extension has several
-advantages:
-
-    * Extension modules (and methods) behave more like their Python counterparts
-    * Smoke testing sub-interpreter support becomes easier,
-      since module isolation could be tested in a single interpreter.
-    * This enables executing an extension module in a pre-created
-      module object, paving the way for extension module support for 
-      ``runpy`` or systems that enable extension module reloading.
+A faster, safer way of accessing module-level state from extension methods
+is needed.
 
 
 Background
@@ -89,7 +82,7 @@ In Python code, the Python-level equivalents may be retrieved as::
         def meth(self):
             instance = self
             module_globals = globals()
-            module_object = sys.modules[__name__]  # XXX why needed? - it's only needed in C, I guess this is another place the analogy breaks down
+            module_object = sys.modules[__name__]
             underlying_function = Foo.meth
             defining_class = Foo
 
@@ -106,7 +99,7 @@ even if the namespace has been manipulated to return a different object, at wors
 By contrast, extension methods are typically implemented as normal C functions. This means that they only have access to their arguments, and any C level thread local and process global state. Traditionally, many extension modules have stored
 their shared state in C level process globals, causing problems when:
     
-    * running multiple initialise/finalise cycles in the same process
+    * running multiple initialize/finalize cycles in the same process
     * reloading modules (e.g. to test conditional imports)
     * loading extension modules in subinterpreters
 
@@ -118,6 +111,10 @@ PEP 3121 attempted to resolve this by offering the PyModule_FindState API, but t
 It's also the case that when looking up a C-level struct such as module state, supplying
 an unexpected object layout can crash the interpreter, so it's significantly more important to ensure that extension
 methods receive the kind of object they expect.
+
+Note that module-level functions already receive the module objects via their
+``self`` argument.
+
 
 Proposal
 ========
@@ -169,8 +166,9 @@ Two possible solutions have been proposed to this problem:
 
 Due to the invasiveness of the latter approach, this PEP proposes adding a MRO walking helper for use in slot method implementations, deferring the more complex alternative as a potential future optimisation.
 
-The Proposal
-============
+
+Specification
+=============
 
 Adding module references to heap types
 --------------------------------------
@@ -228,13 +226,6 @@ will be added::
 Method construction and calling code and will be updated to honor
 ``METH_METHOD``.
 
-
-Argument Clinic
----
-
-XXX [How does this affect Argument Clinic?]
-
-
 Slot methods
 ------------
 
@@ -247,10 +238,24 @@ Helpers
 XXX: I'd like to port a bunch of modules to see what helpers would be convenient
 
 
+Argument Clinic
+---------------
+
+XXX [How does this affect Argument Clinic?]
+
+
+
 Summary of API Changes and Additions
 ====================================
 
 XXX, see above for now
+
+
+Backwards Compatibility
+=======================
+
+One new pointer is added to all heap types.
+All other changes are adding new functions and structures.
 
 
 Possible Future Extensions

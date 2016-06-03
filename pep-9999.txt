@@ -1,0 +1,275 @@
+PEP: 9999
+Title: Module State Access from Methods
+Version: $Revision$
+Last-Modified: $Date$
+Author: Petr Viktorin <encukou@gmail.com>
+Discussions-To: import-sig@python.org
+Status: Active
+Type: Process
+Content-Type: text/x-rst
+Created: 02-Jun-2016
+Python-Version: 3.6
+Post-History:
+
+
+Abstract
+========
+
+This PEP proposes to add a way for CPython methods to access context such as
+the state of the modules they are defined in.
+
+This will allow extension methods to use direct pointer dereferences
+rather than PyState_FindModule for looking up module state.
+
+This fixes one of the remaining roadblocks for adoption of PEP 489
+(Multi-phase extension module initialization).
+
+This PEP is just one step to fully solving the problem that PEP 489 started
+tackling.
+In particular, it does not make module state accessible to slot methods.
+
+
+Rationale
+=========
+
+A step towards improving subinterpreter support in CPython is making it
+possible (and easy) to create multiple instances of a module object from
+a single extension.
+Each such module should have its own module state, distinct and isolated from
+other modules.
+
+The biggest hurdle for this goal is accessing such module state from methods
+of extension types.
+Currently, the best way to access this state is looking up the module via
+``PyState_FindModule``.
+This operation queries the thread-local state, making it relatively costly.
+
+Also, ``PyState_FindModule`` relies on the assumption that in each
+subinterpreter, there is only up to one one module corresponding to
+a given ``PyModuleDef``.
+This assumption does not hold for modules that use multi-phase initialization
+(PEP 489), so ``PyState_FindModule`` is unavailable for these modules.
+
+.. note::
+
+    Enabling creation of several modules from the same extension has several
+    advantages:
+
+        * Smoke testing sub-interpreter support becomes easier,
+          since module isolation could be tested in a single interpreter.
+        * Extension modules behave more like their Python counterparts
+        * This enables executing an extension module in a pre-created
+          module object, paving the way for extension module support for 
+          ``init.py`` or systems that enable extension module reloading.
+
+
+XXX section name
+================
+
+Module-level state is the most important piece of context a method may
+need access to:
+
+   * The instance it is called on (``self``)
+   * The underlying function
+   * The class the method was defined in
+   * The corresponding module
+   * The module state
+
+In Python code, the Python-level equivalents may be retreived as::
+
+    import sys
+
+    class Foo:
+        def meth(self):
+            instance = self
+            underlying_function = Foo.meth
+            defining_class = Foo
+            module_object = sys.modules[__name__]
+            module_globals = globals()
+
+.. note::
+
+    The defining class is not ``type(self)``, since ``type(self)`` might
+    be a subclass of ``Foo``.
+
+Much of this code relies on name-based lookup.
+In Python code, this is OK: if a wrong object is returned, at worst an
+exception is raised.
+However, when looking up a C-level struct such as module state, using
+a wrong object could crash the interpreter.
+Instead allowing of name-based lookup, we need to make the context
+accessible via poiters.
+
+Currently, a bound extension method (``PyCFunction`` or
+``PyCFunctionWithKeywords``) receives only
+``self``, and optionally the arguments.
+
+The context above can be made available with two changes.
+Both additions are optional; extension authors need to opt in to start
+using them:
+
+    * Add a pointer to the module to type objects.
+
+    * Pass the defining class to the underlying C function.
+
+      The defining class is readily available at the time built-in
+      method objects (``PyCFunctionObject``) are created, so it can be stored
+      in a new struct that extends ``PyCFunctionObject``.
+
+The module state can be retreived from the module object via
+``PyModule_GetState``.
+
+Note that this proposal implies that any type whose method needs to access
+module-global state must be a heap type.
+This is necessary to support loading multiple module objects from a single
+extension: a static type, as a C-level global, has no information about
+which module it belongs to.
+
+
+Slot methods
+------------
+
+The above doesn't cover slot methods, such as ``tp_iter`` or ``tp_add``.
+
+The problem with slot methods is that their C API is fixed, so we can't
+simply add a new argument.
+Two possible solutions have been proposed to this problem:
+
+    * Look up the class through walking the MRO.
+      This is potentially expensive, but will be useful if performance is not
+      a problem (such as when raising a module-level exception).
+    * Storing a pointer to the defining class of eachslot in a separate table,
+      ``__typeslots__`` [#1].  This is technically feasible and fast, but
+      quite invasive.
+
+In either case, this PEP is still useful for normal methods.
+A MRO walking helper will be added to solve the immediate problem for
+the common case.
+
+
+Implementation
+==============
+
+Adding module references to heap types
+--------------------------------------
+
+The ``PyHeapTypeObject`` struct will get a new member, ``PyObject *ht_module``,
+that can store a pointer to the module object for which the type was defined.
+It will be ``NULL`` by default, and should not be modified after the type
+object is created.
+
+A new flag, ``Py_TPFLAGS_HAVE_MODULE``, will be set on any type object where
+the ``ht_module`` member is present and non-NULL.
+
+A new factory method will be added for creating modules::
+
+    PyObject* PyType_FromModuleAndSpec(PyObject *module,
+                                       PyType_Spec *spec,
+                                       PyObject *bases)
+
+This acts the same as ``PyType_FromSpecWithBases``, and additionally sets
+``ht_module`` to the provided module object.
+
+Additionally, an accessor, ``PyObject * PyType_GetModule(PyTypeObject *)``
+will be provided.
+
+Usually, creating a class with ``ht_module`` set will create a reference
+cycle invonving the class and the module.
+This is not a problem, as tearing down modules is not a performance-sensitive
+operation.
+Module-level functions typically also create reference cycles.
+
+
+Passing the defining class to extension methods
+-----------------------------------------------
+
+A new style of C-level functions will be added to the current selection of
+``PyCFunction`` and ``PyCFunctionWithKeywords``::
+
+    PyObject *PyCMethod(PyObject *self,
+                        PyTypeObject *definig_class,
+                        PyObject *args, PyObject *kwargs)
+
+A new method object flag, ``METH_METHOD``, will be added to signal that
+the underlying C function is ``PyCMethod``.
+
+To hold the extra information, a new structure extending ``PyCFunctionObject``
+will be added::
+
+    typedef struct {
+        PyCFunctionObject func;
+        PyTypeObject *mm_class; /* Passed as 'cls' arg to the C func */
+    } PyCMethodObject;
+
+Method construction and calling code and will be updated to honor
+``METH_METHOD``.
+
+
+Slot methods
+------------
+
+XXX: Exact API TBD
+
+
+Helpers
+-------
+
+XXX: I'd like to port a bunch of modules to see what helpers would be convenient
+
+
+Summary of API Changes and Additions
+====================================
+
+XXX, see above for now
+
+
+Possible Future Extensions
+==========================
+
+Easy creation of types with module references
+---------------------------------------------
+
+It would be possible to add a PEP 489 execution slot type make
+creating heap tipes significantly easier than calling
+``PyType_FromModuleAndSpec``.
+This is left to a future PEP.
+
+
+Optimization
+------------
+
+CPython optimizes calls to methods that have restricted signatures,
+such as not allowing keyword arguments.
+
+As proposed here, methods defined with the ``METH_METHOD`` flag do not support
+these optimizations.
+
+
+Discussion
+==========
+
+XXX Static exceptions
+
+
+References
+==========
+
+.. [1] [Import-SIG] On singleton modules, heap types, and subinterpreters
+   (https://mail.python.org/pipermail/import-sig/2015-July/001035.html)
+
+
+Copyright
+=========
+
+This document has been placed in the public domain.
+
+
+
+..
+   Local Variables:
+   mode: indented-text
+   indent-tabs-mode: nil
+   sentence-end-double-space: t
+   fill-column: 70
+   coding: utf-8
+   End:

@@ -2,8 +2,8 @@ PEP: 9999
 Title: Module State Access from C Extension Methods
 Version: $Revision$
 Last-Modified: $Date$
-Author: Petr Viktorin <encukou@gmail.com>
-        Nick Coghlan <ncoghlan@gmail.com>
+Author: Petr Viktorin <encukou@gmail.com>,
+        Nick Coghlan <ncoghlan@gmail.com>,
         Eric Snow <ericsnowcurrently@gmail.com>
 Discussions-To: import-sig@python.org
 Status: Active
@@ -261,7 +261,7 @@ All other changes are adding new functions and structures.
 
 
 Implementation
-===
+==============
 
 An initial implementation is available in a Github repository [#gh-repo]_;
 a patchset is at [#gh-patch]_.

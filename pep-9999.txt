@@ -3,6 +3,8 @@ Title: Module State Access from C Extension Methods
 Version: $Revision$
 Last-Modified: $Date$
 Author: Petr Viktorin <encukou@gmail.com>
+        Nick Coghlan <ncoghlan@gmail.com>
+        Eric Snow <ericsnowcurrently@gmail.com>
 Discussions-To: import-sig@python.org
 Status: Active
 Type: Process
@@ -46,13 +48,14 @@ several advantages to extensions that implement it:
 
 The biggest hurdle for adoption of PEP 489 is allowing access to module state
 from methods of extension types.
-Without PEP 489, the way to access this state is by looking up the module via
-``PyState_FindModule``.
-However, this operation queries the thread-local state, making it relatively
-costly and consequently deterring module authors from using it.
+Currently, the way to access this state from extension methods is by looking up the module via
+``PyState_FindModule`` (in contrast to module level functions in extension modules, which
+receive a module reference as an argument).
+However, ``PyState_FindModule`` queries the thread-local state, making it relatively
+costly compared to C level process global access and consequently deterring module authors from using it.
 
 Also, ``PyState_FindModule`` relies on the assumption that in each
-subinterpreter, there is only up to one one module corresponding to
+subinterpreter, there is at most one module corresponding to
 a given ``PyModuleDef``.  This does not align well with Python's import
 machinery.  Since PEP 489 aimed to fix that,  the assumption does
 not hold for modules that use multi-phase initialization, so
@@ -93,7 +96,7 @@ In Python code, the Python-level equivalents may be retrieved as::
 
 Implicitly, the last three of those rely on name-based lookup via the function's ``__globals__`` attribute:
 either the ``Foo`` attribute to access the defining class and Python function object, or ``__name__`` to find the module object in ``sys.modules``.
-In Python code, this is feasible, as ``__globals__`` is set appropriately when the function definition it executed, and
+In Python code, this is feasible, as ``__globals__`` is set appropriately when the function definition is executed, and
 even if the namespace has been manipulated to return a different object, at worst an exception will be raised.
 
 By contrast, extension methods are typically implemented as normal C functions. This means that they only have access to their arguments, and any C level thread local and process global state. Traditionally, many extension modules have stored
@@ -103,7 +106,7 @@ their shared state in C level process globals, causing problems when:
     * reloading modules (e.g. to test conditional imports)
     * loading extension modules in subinterpreters
 
-PEP 3121 attempted to resolve this by offering the PyModule_FindState API, but this still had significant problems when it comes to extension methods (rather than module level functions):
+PEP 3121 attempted to resolve this by offering the ``PyState_FindModule`` API, but this still had significant problems when it comes to extension methods (rather than module level functions):
 
     * it is markedly slower than directly accessing C level process global state
     * there is still some inherent reliance on process global state that means it still doesn't reliably handle module reloading
@@ -112,16 +115,15 @@ It's also the case that when looking up a C-level struct such as module state, s
 an unexpected object layout can crash the interpreter, so it's significantly more important to ensure that extension
 methods receive the kind of object they expect.
 
-Note that module-level functions already receive the module objects via their
-``self`` argument.
-
-
 Proposal
 ========
 
-Currently, a bound extension method (``PyCFunction`` or
-``PyCFunctionWithKeywords``) receives only
-``self``, and (if applicable) the supplied positional and keyword arguments.
+Currently, a bound extension method (``PyCFunction`` or ``PyCFunctionWithKeywords``) receives only
+``self``, and (if applicable) the supplied positional and keyword arguments. 
+
+While module-level extension functions already receive access to the defining module object via their
+``self`` argument, methods of extension types don't have that luxury: they receive the bound instance
+via ``self``, and hence have no direct access to the defining class or the module level state.
 
 The additional module level context described above can be made available with two changes.
 Both additions are optional; extension authors need to opt in to start
@@ -161,8 +163,8 @@ Two possible solutions have been proposed to this problem:
       This is potentially expensive, but will be useful if performance is not
       a problem (such as when raising a module-level exception).
     * Storing a pointer to the defining class of each slot in a separate table,
-      ``__typeslots__`` [#1].  This is technically feasible and fast, but
-      quite invasive.
+      ``__typeslots__`` [#typeslots-mail]_.  This is technically feasible and fast,
+      but quite invasive.
 
 Due to the invasiveness of the latter approach, this PEP proposes adding a MRO walking helper for use in slot method implementations, deferring the more complex alternative as a potential future optimisation.
 
@@ -258,6 +260,13 @@ One new pointer is added to all heap types.
 All other changes are adding new functions and structures.
 
 
+Implementation
+===
+
+An initial implementation is available in a Github repository [#gh-repo]_;
+a patchset is at [#gh-patch]_.
+
+
 Possible Future Extensions
 ==========================
 
@@ -289,8 +298,14 @@ XXX Static exceptions
 References
 ==========
 
-.. [1] [Import-SIG] On singleton modules, heap types, and subinterpreters
+.. [#typeslots-mail] [Import-SIG] On singleton modules, heap types, and subinterpreters
    (https://mail.python.org/pipermail/import-sig/2015-July/001035.html)
+
+.. [#gh-repo]
+   https://github.com/encukou/cpython/commits/module-state-access
+
+.. [#gh-patch]
+   https://github.com/encukou/cpython/compare/master...encukou:module-state-access.patch
 
 
 Copyright

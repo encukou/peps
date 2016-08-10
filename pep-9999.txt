@@ -28,6 +28,10 @@ This fixes one of the remaining roadblocks for adoption of PEP 3121 (Extension
 module initialization and finalization) and PEP 489
 (Multi-phase extension module initialization).
 
+Additionaly, support for easier creation of static exception classes is added.
+This removes the need for keeping per-module state if it would only be used
+for exception classes.
+
 While this PEP takes an additional step towards fully solving the problems that PEP 3121 and PEP 489 started
 tackling, it does not attempt to resolve *all* remaining concerns. In particular, accessing the module state from slot methods (``nb_add``, etc) remains slower than accessing that state from other extension methods.
 
@@ -63,6 +67,41 @@ not hold for modules that use multi-phase initialization, so
 
 A faster, safer way of accessing module-level state from extension methods
 is needed.
+
+
+Static Exceptions
+-----------------
+
+For isolated modules to work, any class whose methods touch module state
+must be a heap class, so that each instance of a module can have its own
+class object.  With the changes proposed in this PEP, heap classes will
+provide access to module state without global registration.  But, to create
+instances of heap classes, one will need the module state in order to
+get the class object corresponding to the appropriate module object.
+Heap types are "viral" – anything that “touches” them must itself be
+a heap type.
+
+Curently, most exception types, apart from the ones in ``builtins``, are
+heap types.  This is likely simply because there is a convenient way
+to create them: ``PyErr_NewException``.  Most exceptions do not need to be
+heap types.  (It does give Python code the ability to add custom attributes
+to the exception class, but monkeypatching exception classes is not very
+useful).
+In some cases, heap exception types are harmful.  For example the ``sqlite``
+module currently uses C-global variables for the exceptions, so any time the
+module is loaded (e.g. from a subinterpreter), these pointers will be
+overwritten with freshly created classes. It seems like the module was
+written expecting ``PyErr_NewException`` to hand out static types – which
+is an assumption that someone casually reading the docs could very well form.
+
+Moreover, since raising exception is a common operations, and heap types
+will be "viral", ``PyErr_NewException`` will tend to "infect" the module
+with "heap-type-ness" – at least if the module decides play well with
+subinterpreters/isolation.  Many modules could go without module state
+entirely if the exception classes were static.
+
+To solve this problem, a new function for creating static exception types
+is proposed.
 
 
 Background
@@ -169,6 +208,16 @@ Two possible solutions have been proposed to this problem:
 Due to the invasiveness of the latter approach, this PEP proposes adding a MRO walking helper for use in slot method implementations, deferring the more complex alternative as a potential future optimisation.
 
 
+Static Exceptions
+-----------------
+
+To faciliate creating static exception classes, a new function is proposed:
+``PyErr_PrepareStaticException``. It will work similarly to
+``PyErr_NewExceptionWithDoc``, but it will take a pre-allocated, zero-filled
+``PyTypeObject``, fill it with the provided info, and call ``PyType_Ready``
+on it.
+
+
 Specification
 =============
 
@@ -234,6 +283,37 @@ Slot methods
 XXX: Exact API TBD
 
 
+Static exceptions
+-----------------
+
+A new function will be added::
+
+    PyTypeObject * PyErr_PrepareStaticException(PyTypeObject *exc,
+                                                const char *name,
+                                                const char *doc,
+                                                PyObject *base)
+
+Given a zero-filled exception type ``exc``, it will fill that object's
+``tp_name``, ``tp_doc`` and ``tp_base`` with the provided information.
+The ``doc`` and ``base`` arguments may be ``NULL``, defaulting to a
+missing docstring and ``PyExc_Exception`` base class, respectively.
+The exception type's ``tp_flags`` will be set to values common to
+built-in exceptions.
+After filling these slots, the function will call ``PyType_Ready`` on
+the exception class, and return it.
+On failure, ``PyErr_PrepareStaticException`` will set an exception
+and return NULL.
+
+If called with an initialized exception type (determined by ``Py_TYPE(exc)``
+being non-NULL), the function will do nothing but return ``exc``.
+
+The function will not be part of the stable ABI, since it needs the module
+to pre-allocate a ``PyTypeObject``.
+
+Since heap types do not support multiple inheritance, the function will
+only allow a single type for ``base``.
+
+
 Helpers
 -------
 
@@ -244,6 +324,18 @@ Argument Clinic
 ---------------
 
 XXX [How does this affect Argument Clinic?]
+
+
+Modules Converted in the Initial Implementation
+-----------------------------------------------
+
+To validate the approach, several modules will be modified during
+the initial implementation:
+
+The ``_sqlite``, ``_pickle``, ``_elementtree``, ``_curses_panel`` and
+``_csv`` modules will be switched to use static exception types.
+
+XXX: Module state
 
 
 
@@ -258,6 +350,16 @@ Backwards Compatibility
 
 One new pointer is added to all heap types.
 All other changes are adding new functions and structures.
+
+The new ``PyErr_PrepareStaticException`` function changes encourages
+modules to switch from using heap-type Exception classes to static ones,
+and a number of modules will be switched in the initial implementation.
+This change will prevent adding class attributes to such types.
+For example, the following will raise AttributeError::
+
+    sqlite.OperationalError.foo = None
+
+Instances and subclasses of such exceptions will not be affected.
 
 
 Implementation
@@ -287,12 +389,6 @@ such as not allowing keyword arguments.
 
 As proposed here, methods defined with the ``METH_METHOD`` flag do not support
 these optimizations.
-
-
-Discussion
-==========
-
-XXX Static exceptions
 
 
 References

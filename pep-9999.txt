@@ -277,6 +277,22 @@ will be added::
 Method construction and calling code and will be updated to honor
 ``METH_METHOD``.
 
+
+Argument Clinic
+---------------
+
+To support passing the defining class to methods using Argument Clinic,
+a new converter will be added to clinic.py: ``definitng_class``.
+
+Each method may only have one argument using this converter, and it must
+appear after ``self``, or, if ``self`` is not used, as the first argument.
+The argument will be of type ``PyTypeObject *``.
+
+When used, Argument Clinic will select ``METH_METHOD`` as the calling
+convention.
+The argument will not appear in ``__text_signature__``.
+
+
 Slot methods
 ------------
 
@@ -318,12 +334,6 @@ Helpers
 -------
 
 XXX: I'd like to port a bunch of modules to see what helpers would be convenient
-
-
-Argument Clinic
----------------
-
-XXX [How does this affect Argument Clinic?]
 
 
 Modules Converted in the Initial Implementation

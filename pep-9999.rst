@@ -23,12 +23,12 @@ Motivation
 Currently third-party module authors face a dilemna when implementing
 functions in C. Either they can use one of the pre-existing built-in function 
 or method classes or implement their own custom class in C.
-The first choice causes them to loose the ability to access module-level data; 
+The first choice causes them to lose the ability to access module-level data; 
 the second choice is an additional maintenance burden and, more importantly,
 has a significant negative impact on performance.
 
 This PEP aims to allow authors of third-party C modules, and tools like to Cython, to
-utilise the per-existing built-in function or method classes without a loss of capabilities relative to a function implemented in Python.
+utilise the pre-existing built-in function or method classes without a loss of capabilities relative to a function implemented in Python.
 
 Introspection
 -------------
@@ -71,7 +71,7 @@ Python visible changes
 #. When binding a ``method_descriptor`` instance to an instance of its owning class, a ``bound_method`` will be created instead of a ``builtin_function_or_method``. This means that the ``method_descriptors`` now mimic the behaviour of Python functions more closely. In other words, ``[].append`` becomes a ``bound_method`` instead of a ``builtin_function_or_method``.
 
 
-Note that ```method_descriptor`` instances will only have access to their module if their ``__objclass__`` class has access to its module. If PEP 573 is approved, then that will always be the case.
+Note that ``method_descriptor`` instances will only have access to their module if their ``__objclass__`` class has access to its module. If PEP 573 is approved, then that will be possible.
 
 C API changes
 -------------

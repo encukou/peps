@@ -92,6 +92,8 @@ and publishing guidelines that the core developers can refer to.
 The "operations and process" section below describes
 how the working group operates and how it is governed.
 
+.. _pep731-members:
+
 Members
 -------
 

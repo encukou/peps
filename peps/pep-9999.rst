@@ -1,0 +1,820 @@
+PEP: 9999
+Title: Guidelines for Python's C API
+Author: Petr Viktorin <encukou@gmail.com>,
+Discussions-To: https://discuss.python.org/c/c-api/30
+Status: Draft
+Type: Process
+Requires: 731
+Created: 20-Nov-2023
+Post-History: XXX
+
+.. pep-banner::
+
+   This is a **draft informational PEP**, published for initial discussion.
+   It is likely to be amended substantially.
+   It does not represent consensus, or binding rules, yet.
+
+.. Authors to be added:
+
+        Guido van Rossum <guido@python.org>,
+        Victor Stinner <vstinner@python.org>,
+        Steve Dower <steve.dower@python.org>,
+        Irit Katriel <irit@python.org>
+
+
+Abstract
+========
+
+XXX Write the abstract last.
+
+
+About this document
+===================
+
+These guidelines represent the consensus of the C API working group,
+established in :pep:`731` to oversee and coordinate
+the development and maintenance of the Python C API.
+
+It is a living document. It can be changed with the approval of either
+all members of the C API working group, or the Steering Council.
+
+
+High-level goals
+================
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/26
+
+Our goal is that the C API is:
+
+* **Useful**: It should provide access to all relevant functionality.
+* **Ergonomic**: It should be easy to use.
+* **Fair**: It should serve the purposes of a variety of stakeholders.
+* **Stable**: It should avoid requiring users to update their code more than necessary.
+* **Evolvable**: It should give Python implementers enough freedom to change implementation details.
+* **Maintainable**: It should be easy to maintain and extend.
+
+
+Meta-guidelines
+===============
+
+Don't panic!
+------------
+
+We do not expect you, fellow CPython contributor, to read and remember
+all of the guidelines.
+If you have any doubt, ask the C API working group for clarifications
+or help in API design.
+
+To help you apply the guidelines, they sometimes repeat information.
+If you find that they contradict themselves, please ask the C API working group
+to clarify.
+
+
+Working group approvals
+-----------------------
+
+In several cases, you should seek approval from the C API working group
+before changing public C API.
+Most notably:
+
+* when the guidelines tell you to do so,
+* when adding an exception to the rules,
+* when adding to the limited API,
+* when adding something that is likely to establish precedent,
+* when adding many APIs at once, or
+* when the guidelines are unclear or don't make sense.
+
+Approvals allow the working group to coordinate designs from multiple people,
+and to collect feedback needed to refine these guidelines.
+
+The approval process is not finalized yet.
+To request an approval, contact any
+:ref:`member of the working group <pep731-members>`.
+
+
+Exceptions to the guidelines
+----------------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/4
+
+Where possible, exceptions to these guidelines should be added as
+*alternatives* to API that follows the guidelines.
+Such exceptions should be clearly identifiable from their names
+(see also: `glossary`_).
+
+If you want to add an exception that is not mentioned in the guidelines,
+please request approval from the C API workgroup.
+
+
+Applicability
+=============
+
+These guidelines only apply to API that is:
+
+* *newly added*. Existing API does not necessarily follow these guidelines;
+  this PEP is not the place for plans to replace, deprecate or remove it.
+* *pubic*: meant for users. That is, not in the *private* or *internal*
+  tiers as defined in the next section.
+
+Note that we have a style guide, :pep:`7`, which applies to *all* C code
+in CPython, including the API.
+
+
+API tiers
+---------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/42 (for limited API)
+
+Python has several tiers of C API.
+The more stable the tier is, the stricter the rules for it are:
+
+*  For **internal** API (only accessible with ``Py_BUILD_CORE``, or not declared
+   in a public header at all), you are free to ignore these guidelines entirely.
+
+*  **Private** API (not intended for users) should be *internal* if possible.
+   Otherwise it must use the ``_Py`` prefix (see :ref:`naming`).
+   The rest of these guidelines don't apply to it.
+
+*  In **unstable** API (prefixed with ``PyUnstable_``), it is OK to ignore
+   these guidelines if there is a reason to do so -- usually for performance.
+   Please document the reason in a source comment.
+
+*  In the **general** public API, these guidelines apply in full force.
+   The C API working group can grant exceptions.
+
+*  For the **limited** API, please get explicit approval from the
+   C API working group for any changes.
+
+
+One header
+==========
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/34
+
+All public API should be available after including ``Python.h``.
+
+To allow selecting an alternate API, such as a subset,
+use feature flags that users define before including the header
+(e.g. ``Py_LIMITED_API``).
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _naming:
+
+Naming
+======
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/21
+
+All public names must be prefixed with ``Py``.
+
+Names that users should not use directly, but need to be visible to the
+compiler/linker, should be prefixed with ``_Py``.
+This is not considered public API.
+
+This applies to all names in a global namespace: functions, macros, variables,
+typedefs, structs, enums, etc.; not to parameters or struct fields.
+
+The ``Py_`` prefix is reserved for global service routines like
+``Py_FatalError``; specific groups of APIs use a longer prefix,
+e.g. ``PyUnicode_`` for string functions.
+Use an existing prefix when applicable. If you want to add a new prefix,
+contact the C API working group.
+
+The prefix is in mixed case, even in macro names (e.g. ``PyUnicode_AS_STRING``).
+
+Unstable API is prefixed with ``PyUnstable_`` instead of ``Py``,
+e.g. ``PyUnstable_Long_IsCompact`` or (hypothetically)
+``PyUnicode_String_GET_SIZE``.
+
+For common API concepts, use terms from :ref:`glossary`.
+Avoid synonyms, and avoid using glossary names for unrelated concepts.
+
+
+Do not reuse names
+------------------
+
+If a function's signature changes, or its behavior changes in
+a backwards-incompatible way, add a new function with a new name.
+You can deprecate and remove the old version following Python's
+:pep:`backwards compatibility policy <387>`.
+
+Even after API has been removed, do not reuse its old name,
+since existing documentation and tutorials will continue to refer to the
+old behavior.
+
+
+Language support
+================
+
+C standard and dialect
+----------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/22
+
+Public API must be compatible with:
+
+- C11, with optional features needed by CPython:
+
+  - IEEE 754 floating point (``__STDC_IEC_559__``)
+  - Atomics (``!__STDC_NO_ATOMICS__``, or MSVC)
+
+- C99
+- C88 with several select C99 features:
+
+  - ``<stdint.h>`` and ``<inttypes.h>``
+  - ``static inline`` functions
+  - designated initializers
+  - intermingled declarations
+  - line comments (``//``)
+
+- C++
+
+It is OK to use optional standard features and compiler-specific features
+for optimizations and optional Python features.
+
+.. TODO: say this is for all C code. Point PEP 7 here: this is not a style issue.
+   (it's not just an API issue either, but here's better than PEP 7)
+
+All function declarations and definitions must use full prototypes
+(i.e. specify the types of all arguments).
+
+Prefer ``static inline`` functions to macros where reasonable.
+
+
+Portable subset of C
+--------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/11 (Treat the ABI as an API)
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/18 (Avoid macros and static inline functions)
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/12 (variadics)
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/37 (Declare constants as variables, instead of macros)
+
+While the C API is defined in terms of the C language, it supports building
+wrappers for languages other than C, such as Rust, Java, assembly, or
+Python with ``ctypes``.
+These wrappers cannot realisically use a full-featured C parser.
+To make it easier to wrap automatically, the public API should
+primarily use a subset of C:
+
+*  All functions must be exported as actual library symbols. Avoid
+   ``inline`` functions and macros.
+*  Avoid variadic functions.
+*  Avoid C-specific types like ``long long``: see :ref:`types`.
+*  Prefer ``const`` symbols over macros for exposing constant values.
+
+Once you add API that conforms to this “portable subset”,
+you can add additional C/C++-specific API. Usually, the C/C++-specific API
+will be either easier to use or more performant.
+For example:
+
+*  A function may be shadowed by a ``static inline`` function or macro with
+   the same behavior. Typically, this allows better performance for C/C++.
+   See `shadowing example`_.
+*  A function that uses C-specific types, such as ``PyLong_AsLongLong``,
+   is OK as long as equivalent functions are provided
+   for the preferred types.
+*  A variadic function is OK if there's an equivalent function
+   that takes an array.
+
+Macros can be used in the following cases:
+
+*  Feature flags (e.g. ``HAVE_FORK``, ``Py_LIMITED_API``)
+*  Shortcuts for functionality that can be accomplished trivially,
+   but perhaps tediously, without macros (e.g. ``Py_VISIT``,
+   ``Py_BEGIN_ALLOW_THREADS``, ``Py_RETURN_RICHCOMPARE``).
+   In this case, the macro-less equivalent should be clear from documentation.
+*  Features that aren't needed in non-C languages (e.g. ``Py_MAX``,
+   ``Py_STRINGIFY``).
+*  Macros used to define the API (e.g. ``PyAPI_FUNC``, ``Py_ALWAYS_INLINE``,
+   ``Py_OBJECT_H``).
+*  Simple constants (e.g. ``Py_TPFLAGS_BASETYPE``, ``PY_VERSION_HEX``).
+   However, consider exporting these as ``const`` symbols.
+*  As implementation detail of shadowing a function.
+
+As always, new exceptions can be added with approval from the C API
+working group.
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _types:
+
+Types
+=====
+
+Scalars
+-------
+
+Avoid types with compiler-specific sizes and memory representations:
+
+* ``long``, ``long long``
+* bitfields
+* ``enum``
+
+Instead, use:
+
+*  ``int32_t`` and other C99+ fixed width integer types
+*  ``size_t``, ``intptr_t``, ``ptrdiff_t`` which necessarily depend on
+   the platform
+*  ``char``
+*  ``double`` (IEEE 754 ``binary64``)
+
+It is OK to use ``int`` for small ranges (as replacement for enum).
+Here, practicality beats purity.
+
+
+Structs
+-------
+·
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/27 Structs
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/8 Blueprint structs
+
+All structs in new API must be one of the following:
+
+*  Opaque structs, whose members and size are not part of the public API.
+   These are handled via function calls.
+*  “Blueprint” structs, used to pass information when e.g. creating a new object.
+   (We don't have examples or a good design of these yet. Please coordinate
+   with the C API working group if you want to add one.)
+*  Simple interoperability structs, whose members and size are part of the API
+   and ABI, e.g. ``Py_complex``.
+   ``Py_buffer`` is at -- or maybe even past -- the limit of what counts
+   as “simple”.
+
+
+Objects
+-------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/29
+
+Use ``PyObject*`` for all Python objects.
+Avoid using concrete types (e.g. ``PyDictObject*``).
+
+Public API should do type checking, and fail with ``TypeError`` rather than
+crash when it gets an object of an unexpected type.
+
+With approval from the C API working group, you can use a concrete type such
+as ``PyTypeObject*`` for consistency with existing API.
+These objects should be type-checked as if they were ``PyObject*``.
+
+See :ref:`ownership` for reference counting guidelines.
+
+Return values
+=============
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/13
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/5
+
+The return value of a function must indicate whether an exception was raised.
+It must not be necessary to use ``PyErr_Occurred`` to disambiguate.
+
+Generally, API functions can return one of:
+
+*  An integral value, where ``-1`` is returned if and only if an exception was
+   raised, and other values signal an absence of exception.
+*  A pointer, where ``NULL`` is returned if and only if an exception was raised.
+*  A few special cases:
+
+   -  Functions that never return, or always set an exception, should use
+      the :c:expr:`void` return type.
+   -  Functions used when the runtime might not be initialized
+      should either:
+
+      *  return ``PyStatus``, or
+      *  return ``-1``/``NULL`` to signal failure, but have an alternate way
+         of reporting error details.
+
+In cases where ``-1`` or ``NULL`` is a valid result, use an
+:ref:`output argument <output argument>` to provide that result.
+
+See `return schemes`_ for concrete examples.
+
+
+Exceptions for infallible functions
+-----------------------------------
+ 
+Some functions can not fail, and callers cannot check for exceptions:
+
+* Subtype-checking functions, like ``PyTuple_Check`` and ``PyTuple_CheckExact``,
+  which return either ``0`` or ``1``.
+  (This does not extend to *subclass* checking, like ``PyObject_IsSubclass``,
+  which can call Python code.)
+* Deallocators and reference sinks like ``PyMem_Free`` and ``Py_DECREF``,
+  which use ``void`` as the return type.
+
+.. note that void Py_INCREF doesn't meet the guidelines. If it was added today
+   it'd be more like Py_NewRef below.
+   Not that it matters in practice, the guidelines are for new API.
+
+Other functions cannot fail, meaning that users may optionally skip error
+checking.
+
+* Refcounting operations, like ``Py_NewRef``.
+* Operations on native types that cannot have exceptional cases
+  (e.g. overflow), like ``Py_HashDouble``.
+
+Note that ``-1`` and ``NULL`` are still reserved for errors;
+infallible functions must never return them.
+
+As always, other exceptions can be added here with approval from the
+C API working group.
+Mind that infallibility is very often an implementation detail
+that should not be exposed in the API.
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _output argument:
+
+Output arguments
+================
+
+.. There's nothing to say for *arguments* in general, it's all under
+   types or reference conting.
+   If that changes, "Output arguments" should be a subsection of "Arguments"
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/32 For output parameters passed by pointer, set them on error: avoid uninitialized values
+
+Output arguments are pointers to memory that a function fills in.
+Use these when a result from a function cannot be returned as return value,
+for example:
+
+* There are multiple results, or
+* ``-1`` or ``NULL`` are valid (non-exceptional) result.
+
+Guidelines for output arguments:
+
+* An output argument must always initialized (even on errors)
+* Output arguments can be ``NULL``; in which case the result is ignored
+  (and a ``PyObject*`` result is not incref'd).
+* Ownership of the result is transferred to the caller, as with return values.
+  See :ref:`ownership` for details.
+
+
+Function behavior
+=================
+
+Do not suppress exceptions
+--------------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/35
+
+Functions must not suppress unknown exceptions, except ones that specifically
+do just that (e.g. ``PyErr_Clear``).
+
+
+Do not allow mutating immutable objects
+---------------------------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/20
+
+If an object is immutable in Python, C API may not mutate it either.
+
+It is of course fine to mutate implementation details: refcounts, lazily
+computed attributes and so on.
+
+Note that current API like ``PyUnicode_WRITE`` allows mutation to create an
+object, and should not be used if the object is no longer “fresh”.
+If you want to add something similar, don't follow this precedent.
+Instead, contact the C API workgroup so we can design a better API.
+
+
+Do not allow creating incomplete/invalid objects
+------------------------------------------------
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/36
+
+C API should not allow creating objects that cannot be immediately safely
+used from Python code.
+
+This rule is most important for -- but not limited to -- the GC protocol:
+
+* A traverse function must be safe to call right after an object
+  is tracked with the GC.
+* Do not avoid creating objects that need additional API calls, which the
+  user can easily forget, before an object is usable.
+  For example, adding to the GC.
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _ownership:
+
+Managing ownership
+==================
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/16 Reference handling
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/17 Document lifetimes & ownership rules
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/25
+
+For new API, the ownership rules and lifetimes of all arguments and return
+values need to be well defined.
+
+All API must hold a **reference** to any data it manipulates, except data
+that's passed by value (numeric types and simple structs such as
+``Py_complex``).
+
+Background and terminology
+--------------------------
+
+A *reference* is a pointer with extra abstract semantics, which comes in
+two flavors:
+
+*  A *strong* or **owned reference** means that the *owner* is responsible for
+   disposing of the reference.
+
+   The **owner** is most often a piece of code that's being executed
+   (with the reference being a local variable), a container (with the
+   reference being a field in the instance struct), or the interpreter itself.
+   Statically allocated data is, conceptually, owned by the *process*.
+
+*  A **borrowed** reference means a copy of a reference held by another
+   owner, with some guarantee in place that the it will stay valid
+   while it's being borrowed.
+
+   Note that a reference may be borrowed from another borrowed reference.
+
+The owner of a strong reference can **transfer ownership** to a new owner.
+Afterwards, the old owner should either:
+
+* not use the reference any more, or
+* treat it as *borrowed* from the new owner, if the new owner guarantees
+  the reference stays valid.
+
+There are two kinds of resources with managed ownership:
+
+*  ``PyObject *``, which we used for all reference-counted resources.
+
+   Borrowed references to ``PyObject *`` may be converted to strong ones
+   via ``Py_NewRef`` or similar.
+
+* Non-reference-counted resources, such as allocated memory.
+
+  These only allow one strong reference.
+
+
+Input arguments
+---------------
+
+By default, references passed as function arguments are *borrowed references*.
+That is:
+
+* The caller is responsible for keeping the reference valid for the duration
+  of the call.
+* The callee must not assume that the reference stays valid after the call
+  returns. (For example, to store it in a global, it would need tor create
+  a new reference and store that.)
+
+:ref:`Output arguments <output argument>` (pointers to memory that the
+function fills) are instead treated as *results*, see below.
+
+
+Results
+-------
+
+By default, ownership of function results (return values and
+:ref:`Output arguments <output argument>`) is transferred to the caller.
+That is:
+
+* After the call, the caller owns the resulting reference.
+* The callee must not assume the result stays valid after it's return.
+
+
+Exceptions to the defaults
+--------------------------
+
+Transferring ownership of arguments
+'''''''''''''''''''''''''''''''''''
+
+For input arguments, the alternative to the default is
+*transferring ownership* of the argument, known informally as “stealing”.
+
+This is allowed in the following cases:
+
+*  Functions that destroy references or resources, like ``Py_DecRef``.
+   These should include a word like ``DecRef``, ``Close``, ``Free`` or
+   ``Dealloc`` in the name (see :ref:`glossary`).
+
+   Use ``Clear`` when the reference pointer is set to ``NULL``, as in
+   ``Py_CLEAR``.
+
+*  Functions that turn a non-reference-counted resource into a different object,
+   destroying the resource (or even repurposing its memory in-place).
+   These should include ``Consume`` in the name (see :ref:`glossary`).
+
+*  Functions that work on statically allocated data (which is “borrowed” from
+   the process itself).
+   These should include ``Static`` in the name (see :ref:`glossary`).
+
+*  Another “stealing” function may be added as an alternative to a function
+   that borrows arguments. Usually, this is needed for performance.
+
+   The guidelines for this are not finalized;
+   please contact the C API workgroup if you need it.
+
+   .. XXX we need to decide if "steal" is acceptable in API names
+
+      * it is an alternative to a function that transfers ownership,
+      * it includes ``Steal`` in the name (see :ref:`glossary`),
+      * its docs explicitly say that ownership of argument(s) is transferred.
+         (Note that docs should use the long proper term, *transfer of ownership*;
+         keep ``Steal`` in the API name.)
+
+
+Returning borrowed references
+'''''''''''''''''''''''''''''
+
+The results, the alternative to the default is returning
+a *borrowed reference*.
+
+*  Only add a function that return borrowed references as an alternative
+   to a function that transfers ownership.
+*  Include ``Borrow`` in the name (see :ref:`glossary`).
+*  Make sure the documentation lists *Return value: Borrowed reference*,
+   and explicitly describes the conditions under which the borrowed reference
+   is valid. (For example: *``None`` is borrowed from the interpreter and
+   is valid until interpreter shutdown.*)
+
+
+Nested references
+-----------------
+
+When designing documenting lifetime and ownership, pay special attention to
+pointers inside ``struct``, and arrays of pointers.
+Always consider the lifetime & ownership of both the container itself and
+the item in it.
+
+Strings
+-------
+
+Treat strings (``const char*``) are non-reference-counted references.
+In particular, make sure the API does not implicitly assume 
+that strings provided by the user are ```static``.
+
+
+Documentation and tests
+=======================
+
+Public API must have proper documentation and tests.
+
+Function documentation should explicitly specify what the return values are,
+what output arguments are initialized to, and when an exception is set.
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _glossary:
+
+Appendix A. C API Naming Glossary
+=================================
+
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/23
+.. ref. https://github.com/capi-workgroup/api-evolution/issues/25 (managing ownership)
+
+Use these terms for naming APIs whenever applicable.
+They are generally used as suffixes.
+
+-  ``From<type>`` (e.g. ``PyLong_FromLong``): creates an object
+-  ``As<type>`` (e.g. ``PyLong_AsLong``): converts to a C type
+-  ``Get``: Retrieve a value (no side effect except allocation/refcounting)
+- ``Va``: Takes varargs
+-  ``Object`` (in functions): Takes a Python object rather than a native type
+   (e.g. ``PyImport_AddModuleObject(PyObject*)`` vs.
+   ``PyImport_AddModule(char*)``)
+-  ``Object`` (in types, e.g. ``PyLongObject``): The instance struct.
+   Omit the underscore before ``Object`` (it's not ``PyLong_Object``).
+-  ``_<typename>`` (``_PyObject_CallFunction_SizeT``): Has an unexpected
+   argument/return type, or a different type than a similar function
+-  ``_impl``: "Inner" function that has a wrapper. Used e.g. by
+   Argument Clinic and C-specific speedups.
+   The API should almost always be marked private (``_Py``).
+
+Names for exceptions to rules
+-----------------------------
+
+-  ``Unchecked``: Doesn't validate a (pre)condition that's normally checked
+-  ``Unsafe``: Doesn't uphold some invariant that users expect
+-  Terms from the :ref:`managing ownership <ownership>` section:
+   - ``Borrow``
+   - (XXX take ownership of an argument: name not finalized)
+   - ``Consume``
+   - ``DecRef``, ``Close``, ``Free``, ``Dealloc``
+   - ``Clear`` (also used for emptying a container)
+   - ``Static``
+
+
+Names for “evolved” versions of API
+-----------------------------------
+
+-  ``Ref``: Returns a new reference
+-  ``WithError``: Has proper error handling
+-  ``With*`` (``WithKeywords``, ``WithBases``, etc.):
+   Takes an additional argument.
+-  ``Flags``: Takes additional flags
+-  ``Ex``: Takes additional arguments. Avoid this; use a more specific name.
+
+Terms to avoid
+--------------
+
+- ``New``
+- ``Fast``
+- ``Ex``
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _shadowing example:
+
+Appendix B. Shadowing example
+=============================
+
+To provide a ``static inline`` equivalent to an exported function,
+write something like:
+
+Header:
+
+.. code-block:: c
+
+    static inline returntype
+    _Py_Foo_impl(ARGS)
+    {
+        ...
+    }
+
+    PyAPI_FUNC(returntype) Py_Foo (ARGS);
+
+    #define Py_Foo _Py_Foo_impl
+
+Code:
+
+.. code-block:: c
+
+    // at the end (after all calls to Py_Foo):
+    #undef Py_Foo
+
+    returntype
+    Py_Foo(ARGS)
+    {
+        return _Py_Foo_impl(ARGS);
+    }
+
+
+.. XXX add a PEP number prefix to the anchor:
+
+.. _return schemes:
+
+Appendix C. Return value schemes
+================================
+
+Here are common schemes of how to encode return values.
+
+*  Success or failure (``int``)
+
+   * ``0`` for success
+   * ``-1``, with an exception set, for failure
+
+*  Yes or no (``int``):
+
+   *  ``0`` for ``false``
+   *  ``1`` for ``true``
+   *  ``-1``, with an exception set, for failure
+
+*  Lookup (“getattr”, “getitem” or “setdefault” style) functions,
+   where the lookup result is passed via an
+   :ref:`output argument <output argument>` (``int``):
+
+   *  ``0`` for “not found”
+      (*result* is set to ``NULL`` or other zero/empty value)
+   *  ``1`` for “found” (*result* is set)
+   *  ``-1``, with an exception set, for failure
+      (*result* is set to ``NULL`` or other zero/empty value)
+
+*  Enumeration-style (``int``):
+
+   * ``-1``, with an exception set, for failure
+   * Zero and positive numbers for values.
+
+*  Hashes (``Py_hash_t``):
+
+*  ``-1``, with an exception set, for failure
+   * All other numbers for result.
+
+*  Objects (``PyObject*``):
+
+   * ``NULL``, with an exception set, for failure
+   * Valid pointer for result
+
+
+Changelog
+=========
+
+* XX-XXX-2024: Initial approved version
+
+
+Copyright
+=========
+
+This document is placed in the public domain or under the
+CC0-1.0-Universal license, whichever is more permissive.

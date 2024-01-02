@@ -113,7 +113,7 @@ These guidelines only apply to API that is:
 
 * *newly added*. Existing API does not necessarily follow these guidelines;
   this PEP is not the place for plans to replace, deprecate or remove it.
-* *pubic*: meant for users. That is, not in the *private* or *internal*
+* *public*: meant for users. That is, not in the *private* or *internal*
   tiers as defined in the next section.
 
 Note that we have a style guide, :pep:`7`, which applies to *all* C code
@@ -186,7 +186,7 @@ The prefix is in mixed case, even in macro names (e.g. ``PyUnicode_AS_STRING``).
 
 Unstable API is prefixed with ``PyUnstable_`` instead of ``Py``,
 e.g. ``PyUnstable_Long_IsCompact`` or (hypothetically)
-``PyUnicode_String_GET_SIZE``.
+``PyUnstable_String_GET_SIZE``.
 
 For common API concepts, use terms from :ref:`glossary`.
 Avoid synonyms, and avoid using glossary names for unrelated concepts.

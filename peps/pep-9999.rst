@@ -220,7 +220,7 @@ Public API must be compatible with:
 
 - C11, with optional features needed by CPython:
 
-  - IEEE 754 floating point (``__STDC_IEC_559__``)
+  - IEEE 754 floating point
   - Atomics (``!__STDC_NO_ATOMICS__``, or MSVC)
 
 - C99

@@ -643,7 +643,22 @@ a *borrowed reference*.
 *  Only add a function that returns a borrowed reference as an alternative
    to a function that transfers ownership.
 *  Include ``Borrow`` in the name (see :ref:`glossary`).
-*  Make sure the documentation lists *Return value: Borrowed reference*,
+*  Documentation should be very explicit; for example::
+
+     The returned reference is borrowed from X
+     (that is: it is only valid as long as you hold a reference to X).
+     To get a :term:`strong reference`, use Y or- Z.
+
+   * “The returned reference is borrowed from p” -- the lender is crucial
+     information
+   * “that is” -- emphasizes that “borrowed from X” and “only valid as long as
+     you hold a reference to X” are equivalent
+   * “only valid as long as you hold a reference to p” -- this should be
+     spelled out rather than e.g. hidden behind a glossary link.
+   * “To get a strong reference...” -- there should always be an alternative
+     that gives you a strong ref.
+
+Make sure the documentation lists *Return value: Borrowed reference*,
    and explicitly describes the conditions under which the borrowed reference
    is valid. (For example: *``None`` is borrowed from the interpreter and
    is valid until interpreter shutdown.*)

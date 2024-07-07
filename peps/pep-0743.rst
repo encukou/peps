@@ -27,25 +27,21 @@ Motivation
 
 Some of Python's C API has flaws that are only obvious in hindsight.
 
-For API that prevents adding features, or presents a serious security risk
-or maintenance burden, we deprecate and remove as described in :pep:`387`.
+If an API that prevents adding features or optimizatins, or presents a serious
+security risk or maintenance burden, we can deprecate and remove it as
+described in :pep:`387`.
 
 However, this leaves us with some API that has “sharp edges”, which works fine
 for its current users, but should be avoided in new code.
 For example:
 
-.. (These are examples, not categories. They overlap.)
-
-- API that is easy to misuse or subtly dangerous, but doesn't have a scary
-  name;
 - API that cannot signal an exception, so failures are either ignored or
-  exit the process with a fatal error;
+  exit the process with a fatal error. For example ``PyObject_HasAttr``.
 - API that is not thread-safe (for example by borrowing references from
-  mutable objects, or exposing unfinished mutable objects);
+  mutable objects, or exposing unfinished mutable objects). For example
+  ``PyDict_GetItemWithError``.
 - API with names that don't use the ``Py``/``_Py`` prefix, and so can clash
   with other code. For example: ``setter``.
-
-XXX: add examples
 
 It is important to note that despite such flaws, it's usually possible
 to use the API correctly. For example, in a single-threaded environment,
@@ -53,8 +49,8 @@ thread safety is not an issue.
 We do not want to break working code, even if it uses API that would be wrong
 in some -- or even *most* -- other contexts.
 
-But, it's in everyone's best interest to avoid such “undesirable” API in *new*
-code, especially if a safer alternative exists.
+But, it's preferable to avoid such “undesirable” API in *new* code,
+especially if a safer alternative exists.
 
 
 Rationale
@@ -66,16 +62,11 @@ choose to do so.
 It might be be sufficient to leave this to third-party linters.
 For that we'd need a good way to expose a list of (soft-)deprecated
 API to such linters.
-While adding that, we can -- rather easily -- avoid an extra tool for simple
-cases, and do the linter's job directly in CPython headers.
+While adding that, we can -- rather easily -- do the linter's job directly
+in CPython headers, avoiding the neel for an extra tool.
 
 Unlike Python, C makes it rather easy to limit available API -- for a whole
 project or for each individual source file -- by defining a macro.
-
-Also, for API that lacks the ``Py`` prefix (e.g. ``setter``), hiding the name
-entirely means that it cannot clash with user or library code.
-A linter cannot do this.
-(Of course, we could use another mechanism for just this issue).
 
 We already do something similar with ``Py_LIMITED_API``, which limits the
 available API to a subset that compiles to stable ABI. (In hindsight, we should
@@ -105,6 +96,17 @@ we'll need to introduce new, better API, and discourage the old one.
 We should look at an individual API and fix all its known issues at once,
 rather than do codebase-wide sweeps for a single kind of issue,
 which would result in multiple renames of the same function.
+
+
+Adding the ``Py`` prefix                     --  XXX
+------------------------
+
+Some names defined in CPython headers is not namespaced: it that lacks the
+``Py`` prefix or variant (``_Py`` and alternative capitalizations).
+For example, ``setter`` or  -- hiding the name entirely means that it cannot clash with user
+or library code.
+A linter cannot do this.
+(Of course, we could use another mechanism for just this issue).
 
 
 Specification
@@ -219,7 +221,7 @@ The following API will be omitted with ``Py_COMPAT_API_VERSION`` set to
   ``PyObject_FREE()``                   ``PyObject_Free()``
   ``PyObject_MALLOC()``                 ``PyObject_Malloc()``
   ``PyObject_REALLOC()``                ``PyObject_Realloc()``
-  ``PySlice_GetIndicesEx()``            (no replacement)
+  ``PySlice_GetIndicesEx()``            (two calls; see current docs)
   ``PyThread_ReInitTLS()``              (no longer needed)
   ``PyThread_create_key()``             ``PyThread_tss_alloc()``
   ``PyThread_delete_key()``             ``PyThread_tss_free()``
@@ -252,7 +254,25 @@ The following API will be omitted with ``Py_COMPAT_API_VERSION`` set to
   ``_Py_WRITE_RESTRICTED``              (no longer needed)
   ====================================  ==============================
 
-* Omit ``<structmember.h>`` legacy API:
+- Soft-deprecate and omit APIs:
+
+  ====================================  ==============================
+  Omitted Deprecated API                Replacement
+  ====================================  ==============================
+  ``PyDict_GetItemWithError()``         ``PyDict_GetItemRef()``
+  ``PyDict_SetDefault()``               ``PyDict_SetDefaultRef()``
+  ``PyMapping_HasKey()``                ``PyMapping_HasKeyWithError()``
+  ``PyMapping_HasKeyString()``          ``PyMapping_HasKeyStringWithError()``
+  ``PyObject_HasAttr()``                ``PyObject_HasAttrWithError()``
+  ``PyObject_HasAttrString()``          ``PyObject_HasAttrStringWithError()``
+  ====================================  ==============================
+
+- Omit ``<structmember.h>`` legacy API:
+
+  The header file ``structmember.h``, which is not included from ``<Python.h>``
+  and must be included separately, will ``#error`` if
+  ``Py_COMPAT_API_VERSION`` is defined.
+  This affects the following API:
 
   ====================================  ==============================
   Omitted Deprecated API                Replacement
@@ -263,7 +283,7 @@ The following API will be omitted with ``Py_COMPAT_API_VERSION`` set to
   ``T_FLOAT``                           ``Py_T_FLOAT``
   ``T_DOUBLE``                          ``Py_T_DOUBLE``
   ``T_STRING``                          ``Py_T_STRING``
-  ``T_OBJECT``                          ``Py_T_OBJECT_EX``
+  ``T_OBJECT``                          (``tp_getset``; docs to be written)
   ``T_CHAR``                            ``Py_T_CHAR``
   ``T_BYTE``                            ``Py_T_BYTE``
   ``T_UBYTE``                           ``Py_T_UBYTE``
@@ -276,39 +296,40 @@ The following API will be omitted with ``Py_COMPAT_API_VERSION`` set to
   ``T_LONGLONG``                        ``Py_T_LONGLONG``
   ``T_ULONGLONG``                       ``Py_T_ULONGLONG``
   ``T_PYSSIZET``                        ``Py_T_PYSSIZET``
-  ``T_NONE``                            ``_Py_T_NONE``
+  ``T_NONE``                            (``tp_getset``; docs to be written)
   ``READONLY``                          ``Py_READONLY``
   ``PY_AUDIT_READ``                     ``Py_AUDIT_READ``
   ``READ_RESTRICTED``                   ``Py_AUDIT_READ``
   ``PY_WRITE_RESTRICTED``               (no longer needed)
-  ``RESTRICTED``                        ``(READ_RESTRICTED | PY_WRITE_RESTRICTED)``
+  ``RESTRICTED``                        ``Py_AUDIT_READ``
   ====================================  ==============================
 
 - Omit soft deprecated macros:
 
-  ======================  ================
+  ======================  =====================================
   Omitted Macros          Replacement
-  ======================  ================
-  ``Py_IS_NAN()``         ``isnan()``
-  ``Py_IS_INFINITY()``    ``isinf(X)``
-  ``Py_IS_FINITE()``      ``isfinite(X)``
-  ``Py_MEMCPY()``         ``memcpy()``
-  ======================  ================
+  ======================  =====================================
+  ``Py_IS_NAN()``         ``isnan()`` (C99+ ``<math.h>``)
+  ``Py_IS_INFINITY()``    ``isinf(X)`` (C99+ ``<math.h>``)
+  ``Py_IS_FINITE()``      ``isfinite(X)`` (C99+ ``<math.h>``)
+  ``Py_MEMCPY()``         ``memcpy()`` (C ``<string.h>``)
+  ====================== =====================================
 
-- Typedefs without the ``Py``/``_Py`` prefix
-  (``getter``, ``setter``, ``allocfunc``, …), omitted in favour of *new* ones
+- Soft-deprecate and omit typedefs without the ``Py``/``_Py`` prefix
+  (``getter``, ``setter``, ``allocfunc``, …), in favour of *new* ones
   that add the prefix (``Py_getter`` , etc.)
 
-- Macros without the ``Py``/``_Py`` prefix
+- Soft-deprecate and omit macros without the ``Py``/``_Py`` prefix
   (``METH_O``, ``CO_COROUTINE``, ``FUTURE_ANNOTATIONS``, ``WAIT_LOCK``, …),
-  omitted in favour of *new* ones that add the prefix  (``Py_METH_O`` , etc.).
+  favour of *new* ones that add the prefix  (``Py_METH_O`` , etc.).
 
   - Replacements for macros generated by ``configure``
     (``HAVE_*``, ``WITH_*``, ``ALIGNOF_*``, ``SIZEOF_*``, and several without
-    a common prefix) may not be ready for 3.14; if so they'll be omitted
-    in later versions.
+    a common prefix) may not be ready for 3.14; if so they'll be omitted with
+    later versions of ``Py_COMPAT_API_VERSION``.
 
 - Any others approved by the C API workgroup
+
 
 Helper macros
 -------------

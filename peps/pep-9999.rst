@@ -785,3 +785,10 @@ Copyright
 
 This document is placed in the public domain or under the
 CC0-1.0-Universal license, whichever is more permissive.
+
+
+XXX
+=========
+
+Argument *names* should generally be included in declarations,
+but may be omitted if the meaning is obvious.

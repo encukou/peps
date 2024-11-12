@@ -86,13 +86,7 @@ API tiers
 One header
 ==========
 
-.. ref. https://github.com/capi-workgroup/api-evolution/issues/34
-
-All public API should be available after including ``Python.h``.
-
-To allow selecting an alternate API, such as a subset,
-use feature flags/macros that users define before including the header
-(e.g. ``Py_LIMITED_API``).
+[MERGED IN api-evolution]
 
 
 .. XXX add a PEP number prefix to the anchor:
@@ -102,28 +96,7 @@ use feature flags/macros that users define before including the header
 Naming
 ======
 
-.. ref. https://github.com/capi-workgroup/api-evolution/issues/21
-
-All public names must be prefixed with ``Py``.
-
-Names that users should not use directly, but need to be visible to the
-compiler/linker, should be prefixed with ``_Py``.
-This is not considered public API.
-
-This applies to all names in a global namespace: functions, macros, variables,
-typedefs, structs, enums, etc.; not to parameters or struct fields.
-
-The ``Py_`` prefix is reserved for global service routines like
-``Py_FatalError``; specific groups of APIs use a longer prefix,
-e.g. ``PyUnicode_`` for string functions.
-Use an existing prefix when applicable. If you want to add a new prefix,
-contact the C API working group.
-
-The prefix is in mixed case, even in macro names (e.g. ``PyUnicode_AS_STRING``).
-
-Unstable API is prefixed with ``PyUnstable_`` instead of ``Py``,
-e.g. ``PyUnstable_Long_IsCompact`` or (hypothetically)
-``PyUnstable_String_GET_SIZE``.
+[MERGED IN api-evolution EXCEPT THE FOLLOWING]
 
 .. XXX NOT IN PR NOT IN PR NOT IN PR NOT IN PR NOT IN PR NOT IN PR :
 
@@ -134,14 +107,7 @@ Avoid synonyms, and avoid using glossary names for unrelated concepts.
 Do not reuse names
 ------------------
 
-If a function's signature changes, or its behavior changes in
-a backwards-incompatible way, add a new function with a new name.
-You can deprecate and remove the old version following Python's
-:pep:`backwards compatibility policy <387>`.
-
-Even after API has been removed, do not reuse its old name,
-since existing documentation and tutorials will continue to refer to the
-old behavior.
+[MERGED IN api-evolution]
 
 
 Language support
@@ -150,34 +116,7 @@ Language support
 C standard and dialect
 ----------------------
 
-.. ref. https://github.com/capi-workgroup/api-evolution/issues/22
-
-.. Some of this repeats guidelines from PEP 7. It's not just about  style,
-   and it's not just about API.  But we don't have a better place yet.
-
-Public API must be compatible with:
-
-- C11, with optional features needed by CPython:
-
-  - IEEE 754 floating point
-  - Atomics (``!__STDC_NO_ATOMICS__``, or MSVC)
-
-- C99
-- C88 with several select C99 features:
-
-  - ``<stdint.h>`` and ``<inttypes.h>``
-  - ``static inline`` functions
-  - designated initializers
-  - intermingled declarations
-  - line comments (``//``)
-
-- C++ (the exact C++ version is currently unspecified; use your best judgment.)
-
-It is OK to use optional standard features and compiler-specific features
-for optimizations and optional Python features.
-
-All function declarations and definitions must use full prototypes
-(i.e. specify the types of all arguments).
+[MERGED IN api-evolution EXCEPT THE FOLLOWING]
 
 Prefer ``static inline`` functions to macros where reasonable.
 

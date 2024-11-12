@@ -140,7 +140,9 @@ primarily use a subset of C:
    ``inline`` functions and macros.
 *  Avoid variadic functions.
 *  Avoid C-specific types like ``long long``: see :ref:`types`.
-*  Prefer ``const`` symbols over macros for exposing constant values.
+*  Prefer ``const`` symbols over macros for exposing constant values.  [!!!!!!!!!!!!!!!!!!!!!!!!!!]
+   [!!!!     - https://github.com/capi-workgroup/api-evolution/issues/37 (Declare constants as variables, instead of macros)
+ ]
 
 Once you add API that conforms to this “portable subset”,
 you can add additional C/C++-specific API. Usually, the additional API
@@ -169,7 +171,7 @@ Macros can be used in the following cases:
 *  Macros used to define the API (e.g. ``PyAPI_FUNC``, ``Py_ALWAYS_INLINE``,
    ``Py_OBJECT_H``).
 *  Simple constants (e.g. ``Py_TPFLAGS_BASETYPE``, ``PY_VERSION_HEX``).
-   However, consider exporting these as ``const`` symbols.
+   However, consider exporting these as ``const`` symbols.  [!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!]
 *  As an implementation detail of shadowing a function.
 
 As always, new exceptions can be added with approval from the C API
@@ -228,19 +230,7 @@ All structs in new API must be one of the following:
 Objects
 -------
 
-[SOME MERGED IN api-evolution]
-
-.. ref. https://github.com/capi-workgroup/api-evolution/issues/29
-
-Use ``PyObject*`` for all Python objects.
-Avoid using concrete types (e.g. ``PyDictObject*``).
-
-Public API should do type checking, and fail with ``TypeError`` rather than
-crash when it gets an object of an unexpected type.
-
-With approval from the C API working group, you can use a concrete type such
-as ``PyTypeObject*`` for consistency with existing API.
-These objects should be type-checked as if they were ``PyObject*``.
+[SOME MERGED IN api-evolution EXCEPT:]
 
 See :ref:`ownership` for reference counting guidelines.
 
@@ -340,7 +330,7 @@ Guidelines for output arguments:
 * Output arguments should allow ``NULL``. In this case,
   the result is ignored (e.g. a ``PyObject*`` result is not incref'd).
 * Ownership of the result is transferred to the caller, as with return values.
-  See :ref:`ownership` for details.
+  See :ref:`ownership` for details. [!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!]
 
 
 Function behavior

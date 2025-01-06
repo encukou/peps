@@ -1,0 +1,482 @@
+PEP: 9999
+Title: Stable ABI, version 4
+Author: Petr Viktorin <encukou@gmail.com>,
+Status: Draft
+Type: Standards Track
+Created: 06-Jan-2025
+Python-Version: 3.14
+
+
+Abstract
+========
+
+[TODO: Write this last.]
+
+
+Motivation
+==========
+
+Stability window for the Stable ABI
+-----------------------------------
+
+In 2009, :pep:`384` defined a Limited API and Stable ABI, which allow extenders
+and embedders of CPython to compile extension modules that are
+binary-compatible with any subsequent version of CPython 3.x.
+
+At that time, it was implicitly expected that there would be a CPython 4.0
+release that would break compatibility.
+(The release would no later than just after 3.9, or around 2023 on the
+then-current 9-month release schedule.)
+
+Since then compatibility-breaking major releases were deemed a *bad idea*,
+and Python's backwards-compatibility policy (:pep:`387`) instead calls for
+removing unwanted features gradually, with a deprecation period before each
+removal.
+
+However, the stable ABI has no mechanism; it is documented to apply until 4.0,
+which is not planned and may never be.
+
+
+Removing runtime `struct`\s from the Stable ABI
+-----------------------------------------------
+
+Note that *most* problems :
+
+* The Limited API is not stable -- that is, functions can be deprecated
+  and removed following Python's general backwards-compatibility policy
+  (:pep:`387`).
+* The Stable ABI only applies to the binary interface, not behaviour.
+  For example, in new versions of Python, functions in the Stable ABI can
+  start, for example: emitting deprecation warnings, being slow,
+  raising errors, or even leaking references.
+  (Of course, such changes need to follow :pep:`387` and good judgement.)
+* When compiled for the Stable ABI, macros such as ``Py_INCREF`` and
+  ``Py_TYPE`` are implemented by calls to runtime functions, so the above
+  applies to them.
+
+However, one aspect cannot be changed: direct acess to members of the
+``PyObject*`` and ``PyVarObject*`` structures.
+Here, ABI stability is interfering with new development -- namely,
+thread-safety without a global interpreter lock (:pep:`703`) and performance
+optimizations.
+
+
+ABI compatibility information and checks
+----------------------------------------
+
+Currently, users are expected to not install incompatible wheels in
+`sys.path`. We can add better information and validation.
+
+- extension filenames (simmilar to the `.cpython-313.pyc` suffix)
+- wheel tags (currently `-abi3-`)
+- check at run-time
+
+XXX selecting a better-optimized version
+
+
+Platform info in filename
+-------------------------
+
+XXX
+In addition to ``.abi3.so``, also load ``.abi3-x86_64-linux-gnu.so``.
+
+
+Limited API and Stable ABI are coupled
+--------------------------------------
+
+Currently, setting the ``Py_LIMITED_API``  macro has two effects:
+
+- Limit the API exposed in ``Python.h`` to the limited subset
+- Build for the stable ABI. For example, ``Py_INCREF`` will be compiled to
+  call a function (``Py_IncRef`` or similar), rather than access
+  memory directly.
+
+
+Rationale
+=========
+
+One build
+---------
+
+A major benefit of stable ABI is reduction the number of compiled extensions
+(wheels) that need to be distributed to cover a range of CPython versions.
+On PyPI, maintainers who request increasing storage size limits for their
+project are routinely encouraged to consider stable ABI
+(for an example, see `#5186 <pypi-support-5186>`_).
+Another benefit is that newly-released versions of CPython can load older
+builds of extension modules.
+
+.. _pypi-support-5186: https://github.com/pypi/support/issues/5186
+
+A less-visible benefit is that each build of a project can build exactly *one*
+version of a Python extension module, avoiding a “for” loop in the build
+system.
+This primarily helps projects that aren't primarily Python modules (and
+don't use Python-friendly build system like Setuptools or Meson), but
+which still feature a Python wrapper.
+Unfortunately, such projects aren't very discoverable: they don't usually
+appear on PyPI. They are, however, a perfect fit for stable ABI.
+
+To preserve “one build”, a new ABI needs be compatible with existing
+versions of CPython before old stable ABI can be retired.
+
+
+Overview
+========
+
+If this PEP is accepted, users will several
+
+- A. A single minor version of CPython, e.g. 3.14, compatible with all patch
+  releases in that series.
+  This continues to be the default.
+
+- B. **Non-free-threaded** builds of CPython 3.2+, as with the current stable ABI.
+  The minimum version can be set higher to enable newer features.
+  (Note that CPython may stop providing non-free-threaded builds at some point
+  in the future; see `Phase III of the PEP 703 resolution <https://discuss.python.org/t/37075>`_.)
+
+  Define ``Py_LIMITED_API``.
+
+- C. **Only free-threaded** builds of CPython 3.14+.
+  (Again, the minimum version can be set higher to enable newer features.)
+
+  Define ``Py_LIMITED_API`` and ``Py_EXPOSE_PYOBJECT`` (see below).
+
+- D. **All** builds of CPython 3.12+, with code changes needed for
+  class definitions.
+  (Again, the minimum version can be set higher to enable newer features.)
+
+  Define ``Py_LIMITED_API``, and avoid members or size of ``PyObject``
+  (see below).
+
+- E. **All** builds of CPython 3.2+, with a severely limited set of features.
+  (Namely, defining custom classes with C state becomes almost impossible.)
+  Again, minimum version can be set higher.
+
+- F. (For completeness: a single specific build of CPython.
+  Experts only; define ``Py_BUILD_CORE``.)
+
+Extensions that need to cover all supported CPython versions are expected
+to build and distribute *two* module files, typically in two separate wheels:
+
+* One for CPython 3.2 to 3.11; another for CPython 3.12+.
+
+* One for all *non-free-threaded* builds (3.2+), one for *free-threaded*
+  CPython (3.14+).
+  (An extra build would be needed for the experimental 3.13 free-threaded
+  CPython.)
+
+This PEP specifies a wheel naming convention that allows these to co-exist in
+a single PyPI release,
+and an extension file naming convention that allows them to co-exist in
+a single ``site-packages`` directory.
+
+Projects that cannot build for multiple versions of Python at the same time
+will need to choose to support either:
+
+- CPython 3.12+ only, or
+- non-free-threaded CPython only.
+
+
+Specification
+=============
+
+Opaque object structures
+------------------------
+
+In Limited API 3.14, the ``PyObject`` and ``PyVarObject`` structures will
+be opaque.
+
+This affects the following members:
+
+- ``ob_refcnt`` (replaced by ``Py_REFCNT``, ``Py_IncRef``, ``Py_DecRef``, and
+  similar functions/macros)
+- ``ob_type`` (replaced by the ``Py_TYPE`` macro, and the ``__class__``
+  Python attribute)
+- ``ob_size`` (replaced by ``Py_SIZE`` and ``Py_SET_SIZE``, both of which
+  will be added to the stable ABI, as functions with the same name)
+
+More importantly, the *size* of the ``PyObject`` struct will not be known to
+the compiler (and it will most likely remain different between the regular
+and free-threaded CPython builds).
+
+This means that it will no longer be possible to use ``PyObject_HEAD``
+for the definition of custom types.
+
+```c
+typedef struct {
+    PyObject_HEAD
+    /* Type-specific fields go here. */
+} CustomObject;
+```
+
+Additionally, it will no longer be possible to
+
+To support Limited API 3.14, all extension-defined types will need to switch
+to API defined in :pep:`697`.
+
+The C API tutorial ("Extending and Embedding the Python" in the documentation)
+will be thoroughly revised.
+
+TODO:
+
+
+``Py_EXPOSE_PYOBJECT``
+----------------------
+
+Since making ``PyObject`` opaque is a rather drastic change,
+
+When ``Py_EXPOSE_PYOBJECT`` is defined to
+
+
+``PyModuleDef``
+---------------
+
+The ``PyModuleDef`` structure will no longer be a ``PyObject*``.
+For backwards compatibility, it will retain a ``m_base`` field
+that will be ABI-compatible with ``PyModuleDef`` of previous
+*non-free-threaded* builds, with the `ob_type` field will be set to a new
+internal Python class (`PyModuleDef_Type_v2`, a subclass of `PyModuleDef_Type`).
+
+The struct will now contain information needed for a *rough* check of
+ABI compatibility.
+The point of the check is to provide nice exceptions for basic mistakes,
+not to fully ensure binary compatibility.
+
+- ``char m_version_major``: set to 1. ``PyModuleDef_InitRuntime`` will fail
+  if it is not 1.
+- ``char m_version_minor``: set to 1. May be incremented backwards-compatible
+  changes (e.g. adding fields to ``PyModuleDef``)
+- ``uint32_t m_api_version``: set to ``PY_VERSION_HEX`` from the ``Python.h``
+  used to build the extension.
+- ``uint32_t m_limited_api_version``: set to ``Py_LIMITED_API``
+  (in ``PY_PACK_VERSION`` format), or to 0 if the macro is undefined.
+- ``uint32_t m_limited_api_version``: set to ``Py_STABLE_ABI``
+  (in ``PY_PACK_VERSION`` format), or to 0 if the macro is undefined.
+- ``uint32_t m_flags``: compatibility flags
+  2 least-significant bits (mask ``0x3``) free-threading:
+
+  - 0: no restriction (stable ABI with ``Py_EXPOSE_PYOBJECT`` not defined)
+  - 2: free-threaded only
+  - 3: non-free-threaded only
+
+  Unassigned bits must be set to 0.
+
+``PyModuleDef_Init`` will be replaced by a *macro* that sets the
+compatibility-related fields and calls a new function,
+``PyModuleDef_RuntimeInit``.
+The implementation of the ``PyModuleDef_Init`` and ``PyModuleDef_HEAD_INIT``
+macros will be added to the documentation, since non-C extensions will need
+to re-implement it.
+
+The function ``int PyModuleDef_RuntimeInit(PyModuleDef *def)`` will return 0
+on success, and -1 with an an exception set on error.
+In particular, If it detects incompatibility with the running interpreter,
+it will set a ``ImportError``.
+
+For backwards compatibility, ``PyModuleDef_Init`` will be exported as
+a function symbol, and will work as before with the pre-3.14 version of
+``PyModuleDef``. It will *fail* on new-style ``PyModuleDef``.
+
+The return value of ``PyModuleDef_Init`` and ``PyModuleDef_RuntimeInit``
+will be ``PyModuleDef *``, rather than ``PyObject*``.
+The return value of the extension entry point (``PyInit_*``) will also
+nominally change to ````PyModuleDef *``.
+For backwards compatibility, on non-free-threaded builds, valid
+``PyObject *`` will still be accepted.
+
+
+Sunsetting ``PyModule_Create2``
+-------------------------------
+
+With ``PyModuleDef`` providing extensible compatibility information,
+the ``PyModule_Create2`` function is redundant.
+
+``PyModule_Create`` will be exposed as a function, and added to Limited API &
+Stable ABI. It will call the checks from ``PyModuleDef_Check``.
+
+``PyModule_Create2`` will be soft-deprecated. It will check its argument and
+call ``PyModule_Create``.
+
+The constants ``PYTHON_API_VERSION`` and ``PYTHON_ABI_STRING`` will be
+soft-deprecated. (Note that it has not been updated since 2006; ABI stability
+was originally versioned independently from the CPython version).
+
+The constants ``PYTHON_ABI_VERSION`` and ``PYTHON_ABI_STRING``
+will also be soft-deprecated.
+(They are defined as ``3`` and ``"3"``, respectively.)
+
+
+Support window
+--------------
+
+Limited ABI will be versioned.
+In filenames and wheel tags, ``abi3`` will be replaced by ``abi3.14``,
+``abi3.15``, etc.
+
+Each feature release of CPython will be compatible with Stable ABI
+released in the preceding 10 years (determined at the point of the 3.x.0
+release).
+For example, under the current release schedule, CPython 3.24 *may* drop
+support for ``abi3.14``.
+
+However, support should only be dropped if there is a reason to do it.
+
+
+Decoupling ``Py_STABLE_ABI`` and ``Py_LIMITED_API``
+---------------------------------------------------
+
+Users can define a new macro, ``Py_STABLE_ABI``, before including ``Python.h``.
+
+When defined to a version in the ``PY_VERSION_HEX`` format, the resulting
+extension will only be compatible with the given CPython interpreter.
+(This is the same as the current behavior when ``Py_LIMITED_API``
+is defined to such a version.)
+
+If ``Py_STABLE_ABI`` is defined to the number ``0``, the resulting extension
+will only be compatible with the CPython the extension is built with.
+(This is the same as the current behavior when ``Py_LIMITED_API``
+is undefined.)
+
+When defined to an unsupported version (including the number 3),
+``Python.h`` will not compile.
+
+If ``Py_STABLE_ABI`` is defined but ``Py_LIMITED_API`` is not,
+then ``Py_LIMITED_API`` will be defined with the same value.
+
+If ``Py_LIMITED_API`` is defined but ``Py_STABLE_ABI`` is not,
+then ``Py_STABLE_ABI`` will be defined with the same value.
+
+If both are defined, then they will be checked for consistency:
+``Py_LIMITED_API`` must be greater than or equal to ``Py_STABLE_ABI``.
+
+When the user defines ``Py_LIMITED_API`` to the number 3, ``Python.h`` will
+*re-define* the macro to the equivalent,
+``Py_PACK_VERSION(3, 2)`` (``0x0302000``).
+(This will make version comparisons in the header files easier.)
+
+
+
+Compatibility
+-------------
+
+Limited API 3.x can be *built* on Python 3.x and above
+
+Limited API 4.x can be *built* on Python 3.x and above
+
+
+Limited API →   3.10  3.11  3.12  3.13  3.14  4.14  4.15
+Build Python version ↓
+
+    3.10           Y    --    --    --    --    --    --
+    3.11           Y     Y    --    --    --    --    --
+    3.12           Y     Y     Y    --    --    --    --
+    3.13           Y     Y     Y     Y    --    --    --
+    3.13t         --    --    --    --    --    --    --
+    3.14           Y     Y     Y     Y     Y     Y    --
+    3.14t         --    --    --    --    --     Y    --
+    3.15           Y     Y     Y     Y     Y     Y     Y
+    3.15t         --    --    --    --    --     Y     Y
+
+Limited API →   3.10  3.11  3.12  3.13  3.14  4.14  4.15
+Runs on ↓
+
+    3.10           Y    --    --    --    --    --    --
+    3.11           Y     Y    --    --    --    --    --
+    3.12           Y     Y     Y    --    --    --    --
+    3.13           Y     Y     Y     Y    --    --    --
+    3.13t         --    --    --    --    --    --    --
+    3.14           Y     Y     Y     Y     Y     Y
+    3.14t         --    --    --    --    --
+
+
+Testing
+-------
+
+XXX
+
+
+Summary of new API
+==================
+
+User-definable macros:
+
+* ``Py_STABLE_ABI``
+* ``Py_EXPOSE_PYOBJECT``
+
+Macros:
+
+* ``PyModuleDef_Check``
+
+New functions:
+
+* ``PyModuleDef_Check``
+* ``PyModule_Create`` (currently a macro)
+
+Changed fields:
+
+* ``PyModuleDef``
+
+Soft-deprecated:
+
+* ``PyModule_Create2``
+* ``PYTHON_API_VERSION``
+* ``PYTHON_API_STRING``
+* ``PYTHON_ABI_VERSION``
+* ``PYTHON_ABI_STRING``
+
+
+TODO
+====
+
+Make PyObject* and other runtime structures optionally fully opaque: https://github.com/capi-workgroup/api-revolution/issues/6
+
+
+Backwards Compatibility
+=======================
+
+Yes.
+
+
+Security Implications
+=====================
+
+There are no known notable security implications.
+
+
+How to Teach This
+=================
+
+The new and changed API will be documented, and this PEP will serve as
+a summary of the chinges.
+
+
+Reference Implementation
+========================
+
+TBD
+
+
+Rejected Ideas
+==============
+
+[Why certain ideas that were brought while discussing this PEP were not ultimately pursued.]
+
+
+Open Issues
+===========
+
+[Any points that are still being decided/discussed.]
+
+
+Footnotes
+=========
+
+[A collection of footnotes cited in the PEP, and a place to list non-inline hyperlink targets.]
+
+
+Copyright
+=========
+
+This document is placed in the public domain or under the
+CC0-1.0-Universal license, whichever is more permissive.

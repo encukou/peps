@@ -82,6 +82,7 @@ NAME_PATTERN = re.compile(r"(?:[^\W\d_]|[ ',\-.])+(?: |$)")
 # any sequence of ASCII letters, digits, or legal special characters
 EMAIL_LOCAL_PART_PATTERN = re.compile(r"[\w!#$%&'*+\-/=?^{|}~.]+", DEFAULT_FLAGS)
 
+DISCOUSE_THREAD_PREFIX = "https://discuss.python.org/t/"
 DISCOURSE_THREAD_PATTERN = re.compile(r"([\w\-]+/)?\d+", DEFAULT_FLAGS)
 DISCOURSE_POST_PATTERN = re.compile(r"([\w\-]+/)?\d+(/\d+)?", DEFAULT_FLAGS)
 
@@ -404,6 +405,9 @@ def _validate_post_history(line_num: int, body: str) -> MessageIterator:
     if body == "":
         return
 
+    must_have_thread = False
+    does_have_thread = False
+
     for offset, line in enumerate(body.removesuffix(",").split("\n"), start=line_num):
         for post in line.removesuffix(",").strip().split(", "):
             prefix, postfix = (post.startswith("`"), post.endswith(">`__"))
@@ -412,9 +416,13 @@ def _validate_post_history(line_num: int, body: str) -> MessageIterator:
             elif prefix and postfix:
                 post_date, post_url = post[1:-4].split(" <")
                 yield from _date(offset, post_date, "Post-History")
-                yield from _thread(offset, post_url, "Post-History")
+                must_have_thread = True
+                does_have_thread |= _is_valid_thread(post_url)
             else:
                 yield offset, "post line must be a date or both start with “`” and end with “>`__”"
+
+    if must_have_thread and not does_have_thread:
+        yield line_num, "Post-History must include a valid thread URL"
 
 
 def _validate_resolution(line_num: int, line: str) -> MessageIterator:
@@ -501,20 +509,18 @@ def _invalid_domain(domain_part: str) -> bool:
     return not root.isalnum() or not root.isascii()
 
 
-def _thread(line_num: int, url: str, prefix: str, *, allow_message: bool = False, discussions_to: bool = False) -> MessageIterator:
+def _is_valid_thread(url, *, allow_message: bool = False, discussions_to: bool = False) -> bool:
     if allow_message and discussions_to:
         msg = "allow_message and discussions_to cannot both be True"
         raise ValueError(msg)
 
-    msg = f"{prefix} must be a valid thread URL"
-
     if not url.startswith("https://"):
         if not discussions_to:
-            yield line_num, msg
-        return
+            return False
+        return True
 
-    if url.startswith("https://discuss.python.org/t/"):
-        remainder = url.removeprefix("https://discuss.python.org/t/").removesuffix("/")
+    if url.startswith(DISCOUSE_THREAD_PREFIX):
+        remainder = url.removeprefix(DISCOUSE_THREAD_PREFIX).removesuffix("/")
 
         # Discussions-To links must be the thread itself, not a post
         if discussions_to:
@@ -524,12 +530,12 @@ def _thread(line_num: int, url: str, prefix: str, *, allow_message: bool = False
             # We use ``str.rpartition`` as the topic name is optional
             topic_name, _, topic_id = remainder.rpartition("/")
             if topic_name == '' and _is_digits(topic_id):
-                return
+                return True
             topic_name = topic_name.replace("-", "0").replace("_", "0")
             # the topic name must not be entirely numeric
             valid_topic_name = not _is_digits(topic_name) and topic_name.isalnum()
             if valid_topic_name and _is_digits(topic_id):
-                return
+                return True
         else:
             # The equivalent pattern is similar to '([\w\-]+/)?\d+(/\d+)?',
             # but the topic name must contain a non-numeric character
@@ -540,7 +546,7 @@ def _thread(line_num: int, url: str, prefix: str, *, allow_message: bool = False
                 valid_topic_name = not _is_digits(topic_name) and topic_name.isalnum()
                 if valid_topic_name and _is_digits(topic_id) and _is_digits(post_id):
                     # the topic name must not be entirely numeric
-                    return
+                    return True
             elif remainder.count("/") == 1:
                 # When there are only two parts, there's an ambiguity between
                 # "topic-name/topic-id" and "topic-id/post-id".
@@ -552,27 +558,31 @@ def _thread(line_num: int, url: str, prefix: str, *, allow_message: bool = False
                 # the topic name must not be entirely numeric
                 left_is_name = not _is_digits(left) and left.isalnum()
                 if left_is_name and _is_digits(right):
-                    return
+                    return True
                 elif _is_digits(left) and _is_digits(right):
-                    return
+                    return True
             else:
                 # When there's only one part, it must be a valid topic ID.
                 if _is_digits(remainder):
-                    return
+                    return True
 
     if url.startswith("https://mail.python.org/pipermail/"):
         remainder = url.removeprefix("https://mail.python.org/pipermail/")
         if MAILMAN_2_PATTERN.fullmatch(remainder) is not None:
-            return
+            return True
 
     if url.startswith("https://mail.python.org/archives/list/"):
         remainder = url.removeprefix("https://mail.python.org/archives/list/")
         if allow_message and MAILMAN_3_MESSAGE_PATTERN.fullmatch(remainder) is not None:
-            return
+            return True
         if MAILMAN_3_THREAD_PATTERN.fullmatch(remainder) is not None:
-            return
+            return True
 
-    yield line_num, msg
+    return False
+
+def _thread(line_num: int, url: str, prefix: str, *, allow_message: bool = False, discussions_to: bool = False) -> MessageIterator:
+    if not _is_valid_thread(url, allow_message=allow_message, discussions_to=discussions_to):
+        yield line_num, f"{prefix} must be a valid thread URL"
 
 
 def _date(line_num: int, date_str: str, prefix: str) -> MessageIterator:

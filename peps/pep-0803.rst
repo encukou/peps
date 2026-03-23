@@ -552,16 +552,14 @@ Compile extensions that are compatible with *both*
   - defining ``Py_GIL_DISABLED`` (on Windows)
   - building with free-threaded CPython headers (elsewhere)
 
-In the above, :samp:`{v}` stands for a the lowest Python version with which
+In the above, :samp:`{v}` stands for the lowest Python version with which
 the extension should be compatible, in :c:func:`Py_PACK_VERSION` format.
 In the cases above, this version must be set to 3.15 or higher.
 
-In both cases, if a resulting extension's *filename* would use the ``abi3``
-tag (that is, :samp:`{modulename}.abi3.so` on Linux, macOS, and similar),
-the ``abi3t`` tag should be used instead (that is,
-:samp:`{modulename}.abi3t.so` on those systems).
-If this tag is not used, there should be no change. (This is always the case
-on Windows, where the filename should remain :samp:`{name}.pyd`.)
+On systems that use ABI version tagged .so files as introduced in :pep:`3149`
+(Linux, macOS, and similar), the extension should be named
+:samp:`{modulename}.abi3t.so`.
+Otherwise, there should be no change: on Windows, use :samp:`{name}.pyd`.
 
 Wheels containing such extensions should be tagged with the
 `compressed ABI tag set <compressed tag set>`_ ``abi3.abi3t``, and
@@ -576,8 +574,9 @@ For example, a wheel tagged ``cp315-abi3.abi3t`` will be compatible with
 .. _Python tag: https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/#python-tag
 
 Alternately, or in addition, tools may allow compiling extensions compatible
-with *only* ``abi3t``, by defining only :samp:`Py_TARGET_ABI3T={v}` and tagging
-the resulting wheel with ``abi3t`` rather than ``abi3.abi3t``.
+with *only* ``abi3t``, by defining only :samp:`Py_TARGET_ABI3T={v}`, building
+with GIL-enabled CPython, and tagging the resulting wheel with ``abi3t`` rather
+than ``abi3.abi3t``.
 This will artificially limit the result to free-threaded interpreters only,
 without many advantages.
 
@@ -598,7 +597,8 @@ Backwards and Forwards Compatibility
 ====================================
 
 Extensions targetting ``abi3t`` will not be backwards-compatible with older
-CPython releases, due to the need to use new ``PyModExport`` API added
+CPython releases, neither at the source level (API) nor in compiled form (ABI),
+due to the need to avoid ``PyModuleDef`` and use new ``PyModExport`` hook added
 in :pep:`793`.
 
 Extension authors who cannot switch may continue to use the existing ``abi3``,
@@ -607,12 +607,12 @@ For compatibility with free-threaded builds, they can compile using
 version-specific ABI -- that is, compile ``abi3``-compatible source
 on free-threaded CPython builds without defining ``Py_TARGET_ABI3T``.
 
-Limited API 3.15 for free-threading is a subset of the "``abi3``" Limited
-API 3.15, and as such, it will be forward-compatible with future versions
-of CPython 3.x.
-Older versions of the Limited API (that is, 3.14 and below) will continue
-to be forward-compatible with GIL-enabled builds of CPython 3.x, starting with
-the version that introduced the given Limited API.
+As for the existing Stable ABI: ``abi3`` :samp:`3.{x}` continues to be
+compatible with *GIL-enabled* CPython :samp:`3.{x}` or above.
+(While this has been the case since Python 3.13, the "GIL-enabled" limitation
+does break the of the promise in :pep:`384`.
+Or, depending on how you look at it, *will* break the promise if and when
+free-threaded builds become default.)
 
 
 Compatibility Overview
@@ -876,6 +876,9 @@ Less importantly, merging the ABIs would also remove an "escape hatch" of
 possibly making ``abi3`` and ``abi3t`` diverge in the future.
 (Such divergence could only affect a few niche APIs, which can be only added
 to ``abi3`` or ``abi3t``, but excluded from the intersection.)
+
+In a "softer" but important line of reasoning, the ``abi3.abi3t`` tag is
+explicit, answering whether a wheel is still compatible with ``abi3``.
 
 
 Naming this ``abi4``
